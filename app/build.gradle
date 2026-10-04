@@ -1,0 +1,12 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.mirai.ui'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.mirai.ui'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+}
