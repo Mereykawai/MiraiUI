@@ -9,6 +9,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.*;
+import android.graphics.drawable.AdaptiveIconDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -20,12 +21,13 @@ import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.*;
+import android.view.animation.DecelerateInterpolator;
+import android.view.animation.OvershootInterpolator;
 import android.widget.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class MainActivity extends Activity {
-    static final boolean BLUR = false;
     PackageManager pm;
     SharedPreferences sp;
     List<String> all = new ArrayList<>(), shown = new ArrayList<>(), home = new ArrayList<>();
@@ -34,9 +36,11 @@ public class MainActivity extends Activity {
     Map<String, Bitmap> bmps = new ConcurrentHashMap<>();
     BaseAdapter drawerAd, homeAd;
     LinearLayout dock, drawer;
+    GridView homeGrid, grid;
     EditText search;
     GestureDetector gd;
     Dialog folderDlg;
+    int isz;
 
     int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
 
@@ -47,12 +51,46 @@ public class MainActivity extends Activity {
         return g;
     }
 
+    GradientDrawable glass(int r) {
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x66FFFFFF, 0x26FFFFFF});
+        g.setCornerRadius(dp(r));
+        g.setStroke(dp(1), 0x55FFFFFF);
+        return g;
+    }
+
+    void prefs() {
+        int[] s = {52, 60, 68};
+        isz = dp(s[sp.getInt("size", 1)]);
+        int cols = sp.getInt("cols", 4);
+        homeGrid.setNumColumns(cols);
+        grid.setNumColumns(cols);
+    }
+
     Bitmap rounded(Drawable d) {
-        int s = dp(60);
+        int s = isz, shape = sp.getInt("shape", 1);
         Bitmap b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(b);
-        d.setBounds(0, 0, s, s);
-        d.draw(c);
+        if (shape == 0) {
+            d.setBounds(0, 0, s, s);
+            d.draw(c);
+            return b;
+        }
+        float r = shape == 2 ? s / 2f : s * 0.28f;
+        Path p = new Path();
+        p.addRoundRect(0, 0, s, s, r, r, Path.Direction.CW);
+        c.clipPath(p);
+        if (Build.VERSION.SDK_INT >= 26 && d instanceof AdaptiveIconDrawable) {
+            AdaptiveIconDrawable a = (AdaptiveIconDrawable) d;
+            int o = s / 4;
+            if (a.getBackground() != null) { a.getBackground().setBounds(-o, -o, s + o, s + o); a.getBackground().draw(c); }
+            if (a.getForeground() != null) { a.getForeground().setBounds(-o, -o, s + o, s + o); a.getForeground().draw(c); }
+        } else {
+            c.drawColor(Color.WHITE);
+            int i = s / 7;
+            d.setBounds(i, i, s - i, s - i);
+            d.draw(c);
+        }
         return b;
     }
 
@@ -91,7 +129,7 @@ public class MainActivity extends Activity {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         c.setGravity(Gravity.CENTER_HORIZONTAL);
-        c.addView(new ImageView(this), new LinearLayout.LayoutParams(dp(60), dp(60)));
+        c.addView(new ImageView(this), new LinearLayout.LayoutParams(isz, isz));
         TextView t = new TextView(this);
         t.setTextColor(Color.WHITE);
         t.setTextSize(11);
@@ -111,6 +149,12 @@ public class MainActivity extends Activity {
         t.setText(labels.get(pkg));
         c.setOnClickListener(x -> launch(pkg));
         c.setOnLongClickListener(x -> { menu(pkg); return true; });
+        c.setOnTouchListener((x, e) -> {
+            int a = e.getAction();
+            if (a == MotionEvent.ACTION_DOWN) x.animate().scaleX(.9f).scaleY(.9f).setDuration(90).start();
+            else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) x.animate().scaleX(1f).scaleY(1f).setDuration(150).start();
+            return false;
+        });
         return c;
     }
 
@@ -130,21 +174,21 @@ public class MainActivity extends Activity {
         wrap.setGravity(Gravity.CENTER_HORIZONTAL);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setBackground(round(0x55FFFFFF, 18));
-        box.setPadding(dp(5), dp(5), dp(5), dp(5));
+        box.setGravity(Gravity.CENTER);
+        box.setBackground(glass(18));
         for (int r = 0; r < 2; r++) {
             LinearLayout row = new LinearLayout(this);
             for (int c = 0; c < 2; c++) {
                 int i = r * 2 + c;
                 ImageView iv = new ImageView(this);
                 if (i < pk.size()) iv.setImageBitmap(bmps.get(pk.get(i)));
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(21), dp(21));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(isz * 2 / 5, isz * 2 / 5);
                 lp.setMargins(dp(2), dp(2), dp(2), dp(2));
                 row.addView(iv, lp);
             }
             box.addView(row);
         }
-        wrap.addView(box, new LinearLayout.LayoutParams(dp(60), dp(60)));
+        wrap.addView(box, new LinearLayout.LayoutParams(isz, isz));
         wrap.setOnClickListener(v -> openFolder(it));
         wrap.setOnLongClickListener(v -> {
             new AlertDialog.Builder(this).setItems(new String[]{"Расформировать папку"}, (d, w) -> {
@@ -171,10 +215,13 @@ public class MainActivity extends Activity {
             public View getView(int i, View v, ViewGroup p) { return appCell(pk.get(i), true); }
         });
         folderDlg = new AlertDialog.Builder(this).setView(g).create();
-        folderDlg.getWindow().setBackgroundDrawable(round(0xEE20202A, 30));
+        folderDlg.getWindow().setBackgroundDrawable(round(0xDD20202A, 32));
         folderDlg.show();
-        setBlur(true);
-        folderDlg.setOnDismissListener(d -> setBlur(false));
+        blurWin(folderDlg.getWindow(), true);
+        g.setScaleX(.8f);
+        g.setScaleY(.8f);
+        g.setAlpha(0f);
+        g.animate().scaleX(1f).scaleY(1f).alpha(1f).setInterpolator(new OvershootInterpolator(1.1f)).setDuration(260).start();
     }
 
     void launch(String pkg) {
@@ -183,13 +230,13 @@ public class MainActivity extends Activity {
         if (in != null) startActivity(in);
     }
 
-    void setBlur(boolean on) {
-        if (!BLUR || Build.VERSION.SDK_INT < 31) return;
+    void blurWin(Window w, boolean on) {
+        if (Build.VERSION.SDK_INT < 31 || !sp.getBoolean("blur", false)) return;
         try {
-            WindowManager.LayoutParams lp = getWindow().getAttributes();
-            if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
-            lp.setBlurBehindRadius(on ? 60 : 0);
-            getWindow().setAttributes(lp);
+            WindowManager.LayoutParams lp = w.getAttributes();
+            if (on) w.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
+            lp.setBlurBehindRadius(on ? 50 : 0);
+            w.setAttributes(lp);
         } catch (Throwable t) { }
     }
 
@@ -261,6 +308,33 @@ public class MainActivity extends Activity {
         }).show();
     }
 
+    void settings() {
+        String[] shapes = {"Оригинал", "Скруглённые", "Круглые"};
+        int[] sizes = {52, 60, 68};
+        String[] it = {
+                "Форма иконок: " + shapes[sp.getInt("shape", 1)],
+                "Размер иконок: " + sizes[sp.getInt("size", 1)],
+                "Колонок: " + sp.getInt("cols", 4),
+                "Размытие: " + (sp.getBoolean("blur", false) ? "вкл" : "выкл"),
+                "Подписи на столе: " + (sp.getBoolean("hl", false) ? "вкл" : "выкл")};
+        new AlertDialog.Builder(this).setTitle("MiraiUi").setItems(it, (d, w) -> {
+            SharedPreferences.Editor e = sp.edit();
+            if (w == 0) e.putInt("shape", (sp.getInt("shape", 1) + 1) % 3);
+            if (w == 1) e.putInt("size", (sp.getInt("size", 1) + 1) % 3);
+            if (w == 2) e.putInt("cols", sp.getInt("cols", 4) == 4 ? 5 : 4);
+            if (w == 3) e.putBoolean("blur", !sp.getBoolean("blur", false));
+            if (w == 4) e.putBoolean("hl", !sp.getBoolean("hl", false));
+            e.apply();
+            prefs();
+            homeGrid.setAdapter(homeAd);
+            grid.setAdapter(drawerAd);
+            bmps.clear();
+            labels.clear();
+            reload();
+            settings();
+        }).show();
+    }
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -284,7 +358,7 @@ public class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER);
-        card.setBackground(round(0x88506070, 30));
+        card.setBackground(glass(30));
         String[][] f = {{"d", "56", "FFFFFFFF"}, {"EEEE", "16", "E6FFFFFF"}, {"MMMM", "14", "B3FFFFFF"}};
         for (String[] x : f) {
             TextClock t = new TextClock(this);
@@ -300,8 +374,7 @@ public class MainActivity extends Activity {
         top.addView(card, dp2);
         page.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
-        GridView homeGrid = new GridView(this);
-        homeGrid.setNumColumns(4);
+        homeGrid = new GridView(this);
         homeGrid.setVerticalSpacing(dp(22));
         homeGrid.setSelector(android.R.color.transparent);
         homeAd = new BaseAdapter() {
@@ -310,7 +383,7 @@ public class MainActivity extends Activity {
             public long getItemId(int i) { return i; }
             public View getView(int i, View v, ViewGroup p) {
                 String it = home.get(i);
-                return it.startsWith("f:") ? folderCell(it) : appCell(it, false);
+                return it.startsWith("f:") ? folderCell(it) : appCell(it, sp.getBoolean("hl", false));
             }
         };
         homeGrid.setAdapter(homeAd);
@@ -323,8 +396,9 @@ public class MainActivity extends Activity {
         pill.setTextColor(Color.WHITE);
         pill.setTextSize(15);
         pill.setPadding(dp(26), dp(10), dp(26), dp(10));
-        pill.setBackground(round(0x66000000, 24));
+        pill.setBackground(glass(24));
         pill.setOnClickListener(v -> openDrawer());
+        pill.setOnLongClickListener(v -> { settings(); return true; });
         LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(-2, -2);
         pl.gravity = Gravity.CENTER_HORIZONTAL;
         pl.bottomMargin = dp(16);
@@ -332,6 +406,8 @@ public class MainActivity extends Activity {
 
         dock = new LinearLayout(this);
         dock.setGravity(Gravity.CENTER);
+        dock.setBackground(glass(34));
+        dock.setPadding(dp(10), dp(12), dp(10), dp(12));
         page.addView(dock, new LinearLayout.LayoutParams(-1, -2));
         root.addView(page);
 
@@ -345,7 +421,7 @@ public class MainActivity extends Activity {
         search.setHintTextColor(0x99FFFFFF);
         search.setTextColor(Color.WHITE);
         search.setSingleLine(true);
-        search.setBackground(round(0x22FFFFFF, 22));
+        search.setBackground(glass(22));
         search.setPadding(dp(18), dp(12), dp(18), dp(12));
         LinearLayout.LayoutParams sp2 = new LinearLayout.LayoutParams(-1, -2);
         sp2.bottomMargin = dp(16);
@@ -355,8 +431,7 @@ public class MainActivity extends Activity {
             public void onTextChanged(CharSequence s, int a, int c, int d) { filter(); }
             public void afterTextChanged(Editable e) {}
         });
-        GridView grid = new GridView(this);
-        grid.setNumColumns(4);
+        grid = new GridView(this);
         grid.setVerticalSpacing(dp(16));
         grid.setSelector(android.R.color.transparent);
         drawerAd = new BaseAdapter() {
@@ -371,6 +446,7 @@ public class MainActivity extends Activity {
         grid.setAdapter(drawerAd);
         drawer.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1f));
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
+        prefs();
         setContentView(root);
 
         gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
@@ -388,18 +464,20 @@ public class MainActivity extends Activity {
     }
 
     void openDrawer() {
+        int h = getResources().getDisplayMetrics().heightPixels;
         drawer.setVisibility(View.VISIBLE);
-        drawer.setTranslationY(getResources().getDisplayMetrics().heightPixels);
-        drawer.animate().translationY(0).setDuration(200).start();
-        setBlur(true);
+        drawer.setTranslationY(h / 3f);
+        drawer.setAlpha(0f);
+        drawer.animate().translationY(0).alpha(1f).setInterpolator(new DecelerateInterpolator(2f)).setDuration(260).start();
+        blurWin(getWindow(), true);
     }
 
     void closeDrawer() {
         if (drawer.getVisibility() != View.VISIBLE) return;
         search.setText("");
-        setBlur(false);
-        drawer.animate().translationY(getResources().getDisplayMetrics().heightPixels).setDuration(180)
-                .withEndAction(() -> drawer.setVisibility(View.GONE)).start();
+        blurWin(getWindow(), false);
+        drawer.animate().translationY(getResources().getDisplayMetrics().heightPixels / 3f).alpha(0f)
+                .setDuration(200).withEndAction(() -> drawer.setVisibility(View.GONE)).start();
     }
 
     @Override
@@ -410,61 +488,4 @@ public class MainActivity extends Activity {
 
     void reload() {
         new Thread(() -> {
-            Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-            List<String> pk = new ArrayList<>();
-            for (ResolveInfo r : pm.queryIntentActivities(q, 0)) {
-                String p = r.activityInfo.packageName;
-                if (pk.contains(p)) continue;
-                pk.add(p);
-                if (!labels.containsKey(p)) {
-                    labels.put(p, r.loadLabel(pm).toString());
-                    bmps.put(p, rounded(r.loadIcon(pm)));
-                }
-            }
-            Collections.sort(pk, (a, c) -> labels.get(a).compareToIgnoreCase(labels.get(c)));
-            runOnUiThread(() -> apply(pk));
-        }).start();
-    }
-
-    void apply(List<String> pk) {
-        all = pk;
-        known = new HashSet<>(pk);
-        if (!sp.contains("dock")) {
-            List<String> d = new ArrayList<>();
-            for (String k : new String[]{"dialer", "contacts", "mms", "camera"})
-                for (String p : all)
-                    if (p.contains(k)) { d.add(p); break; }
-            sp.edit().putString("dock", TextUtils.join(",", d)).apply();
-        }
-        home.clear();
-        for (String it : sp.getString("home", "").split(",")) {
-            if (it.startsWith("f:") ? !fpk(it).isEmpty() : known.contains(it)) home.add(it);
-        }
-        homeAd.notifyDataSetChanged();
-        dock.removeAllViews();
-        for (String p : getDock())
-            dock.addView(appCell(p, false), new LinearLayout.LayoutParams(0, -2, 1f));
-        filter();
-    }
-
-    void filter() {
-        String s = search.getText().toString().trim().toLowerCase();
-        shown.clear();
-        for (String p : all)
-            if (s.isEmpty() || labels.get(p).toLowerCase().contains(s)) shown.add(p);
-        drawerAd.notifyDataSetChanged();
-    }
-
-    @Override
-    protected void onNewIntent(Intent i) {
-        super.onNewIntent(i);
-        if (folderDlg != null) folderDlg.dismiss();
-        closeDrawer();
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (folderDlg != null && folderDlg.isShowing()) folderDlg.dismiss();
-        else closeDrawer();
-    }
-}
+            Intent q = new Intent(Intent.ACTION_MAIN).addCategor
