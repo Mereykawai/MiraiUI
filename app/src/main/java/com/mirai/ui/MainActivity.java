@@ -10,6 +10,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.*;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
@@ -21,13 +22,16 @@ import android.text.TextWatcher;
 import android.view.*;
 import android.widget.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MainActivity extends Activity {
+    static final boolean BLUR = false;
     PackageManager pm;
     SharedPreferences sp;
-    List<ResolveInfo> all = new ArrayList<>(), shown = new ArrayList<>();
-    Map<String, ResolveInfo> byPkg = new HashMap<>();
-    List<String> home = new ArrayList<>();
+    List<String> all = new ArrayList<>(), shown = new ArrayList<>(), home = new ArrayList<>();
+    Set<String> known = new HashSet<>();
+    Map<String, String> labels = new ConcurrentHashMap<>();
+    Map<String, Bitmap> bmps = new ConcurrentHashMap<>();
     BaseAdapter drawerAd, homeAd;
     LinearLayout dock, drawer;
     EditText search;
@@ -41,6 +45,15 @@ public class MainActivity extends Activity {
         g.setColor(color);
         g.setCornerRadius(dp(r));
         return g;
+    }
+
+    Bitmap rounded(Drawable d) {
+        int s = dp(60);
+        Bitmap b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        d.setBounds(0, 0, s, s);
+        d.draw(c);
+        return b;
     }
 
     class ClockView extends View {
@@ -74,42 +87,40 @@ public class MainActivity extends Activity {
         }
     }
 
-    ImageView icon(ResolveInfo ri) {
-        ImageView ic = new ImageView(this);
-        ic.setImageDrawable(ri.loadIcon(pm));
-        ic.setClipToOutline(true);
-        ic.setOutlineProvider(new ViewOutlineProvider() {
-            public void getOutline(View v, Outline o) { o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dp(17)); }
-        });
-        return ic;
-    }
-
-    View appCell(ResolveInfo ri, boolean label) {
+    View newCell() {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         c.setGravity(Gravity.CENTER_HORIZONTAL);
-        c.addView(icon(ri), new LinearLayout.LayoutParams(dp(60), dp(60)));
-        if (label) {
-            TextView t = new TextView(this);
-            t.setText(ri.loadLabel(pm));
-            t.setTextColor(Color.WHITE);
-            t.setTextSize(11);
-            t.setSingleLine(true);
-            t.setGravity(Gravity.CENTER);
-            t.setShadowLayer(4, 0, 1, 0x99000000);
-            t.setPadding(0, dp(4), 0, 0);
-            c.addView(t);
-        }
-        c.setOnClickListener(v -> launch(ri));
-        c.setOnLongClickListener(v -> { menu(ri); return true; });
+        c.addView(new ImageView(this), new LinearLayout.LayoutParams(dp(60), dp(60)));
+        TextView t = new TextView(this);
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(11);
+        t.setSingleLine(true);
+        t.setGravity(Gravity.CENTER);
+        t.setShadowLayer(4, 0, 1, 0x99000000);
+        t.setPadding(0, dp(4), 0, 0);
+        c.addView(t);
         return c;
     }
+
+    View bind(View v, String pkg, boolean label) {
+        LinearLayout c = (LinearLayout) v;
+        ((ImageView) c.getChildAt(0)).setImageBitmap(bmps.get(pkg));
+        TextView t = (TextView) c.getChildAt(1);
+        t.setVisibility(label ? View.VISIBLE : View.GONE);
+        t.setText(labels.get(pkg));
+        c.setOnClickListener(x -> launch(pkg));
+        c.setOnLongClickListener(x -> { menu(pkg); return true; });
+        return c;
+    }
+
+    View appCell(String pkg, boolean label) { return bind(newCell(), pkg, label); }
 
     int fid(String it) { return Integer.parseInt(it.split(":", 3)[1]); }
 
     List<String> fpk(String it) {
         List<String> l = new ArrayList<>();
-        for (String p : it.split(":", 3)[2].split("\\|")) if (!p.isEmpty() && byPkg.containsKey(p)) l.add(p);
+        for (String p : it.split(":", 3)[2].split("\\|")) if (!p.isEmpty() && known.contains(p)) l.add(p);
         return l;
     }
 
@@ -126,7 +137,7 @@ public class MainActivity extends Activity {
             for (int c = 0; c < 2; c++) {
                 int i = r * 2 + c;
                 ImageView iv = new ImageView(this);
-                if (i < pk.size()) iv.setImageDrawable(byPkg.get(pk.get(i)).loadIcon(pm));
+                if (i < pk.size()) iv.setImageBitmap(bmps.get(pk.get(i)));
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(21), dp(21));
                 lp.setMargins(dp(2), dp(2), dp(2), dp(2));
                 row.addView(iv, lp);
@@ -140,7 +151,7 @@ public class MainActivity extends Activity {
                 home.remove(it);
                 home.addAll(fpk(it));
                 saveHome();
-                reload();
+                apply(all);
             }).show();
             return true;
         });
@@ -157,23 +168,23 @@ public class MainActivity extends Activity {
             public int getCount() { return pk.size(); }
             public Object getItem(int i) { return pk.get(i); }
             public long getItemId(int i) { return i; }
-            public View getView(int i, View v, ViewGroup p) { return appCell(byPkg.get(pk.get(i)), true); }
+            public View getView(int i, View v, ViewGroup p) { return appCell(pk.get(i), true); }
         });
         folderDlg = new AlertDialog.Builder(this).setView(g).create();
-        folderDlg.getWindow().setBackgroundDrawable(round(0xCC20202A, 30));
+        folderDlg.getWindow().setBackgroundDrawable(round(0xEE20202A, 30));
         folderDlg.show();
         setBlur(true);
         folderDlg.setOnDismissListener(d -> setBlur(false));
     }
 
-    void launch(ResolveInfo ri) {
+    void launch(String pkg) {
         if (folderDlg != null) folderDlg.dismiss();
-        Intent in = pm.getLaunchIntentForPackage(ri.activityInfo.packageName);
+        Intent in = pm.getLaunchIntentForPackage(pkg);
         if (in != null) startActivity(in);
     }
 
     void setBlur(boolean on) {
-        if (Build.VERSION.SDK_INT < 31) return;
+        if (!BLUR || Build.VERSION.SDK_INT < 31) return;
         try {
             WindowManager.LayoutParams lp = getWindow().getAttributes();
             if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
@@ -186,7 +197,7 @@ public class MainActivity extends Activity {
 
     List<String> getDock() {
         List<String> l = new ArrayList<>();
-        for (String p : sp.getString("dock", "").split(",")) if (byPkg.containsKey(p)) l.add(p);
+        for (String p : sp.getString("dock", "").split(",")) if (known.contains(p)) l.add(p);
         return l;
     }
 
@@ -204,10 +215,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    void menu(ResolveInfo ri) {
-        String pkg = ri.activityInfo.packageName;
+    void menu(String pkg) {
         String[] items = {"На рабочий стол", "В док", "В папку", "Убрать", "О приложении"};
-        new AlertDialog.Builder(this).setTitle(ri.loadLabel(pm)).setItems(items, (d, w) -> {
+        new AlertDialog.Builder(this).setTitle(labels.get(pkg)).setItems(items, (d, w) -> {
             if (folderDlg != null) folderDlg.dismiss();
             List<String> dk = getDock();
             if (w == 0) { strip(pkg); home.add(pkg); }
@@ -220,7 +230,7 @@ public class MainActivity extends Activity {
             }
             sp.edit().putString("dock", TextUtils.join(",", dk)).apply();
             saveHome();
-            reload();
+            apply(all);
         }).show();
     }
 
@@ -247,7 +257,7 @@ public class MainActivity extends Activity {
                 home.set(pos, "f:" + id + ":" + TextUtils.join("|", l));
             } else home.add("f:" + id + ":" + pkg);
             saveHome();
-            reload();
+            apply(all);
         }).show();
     }
 
@@ -267,36 +277,24 @@ public class MainActivity extends Activity {
         page.setPadding(dp(18), dp(56), dp(18), dp(16));
 
         LinearLayout top = new LinearLayout(this);
-        ClockView clock = new ClockView(this);
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, dp(160), 1f);
         cp.rightMargin = dp(8);
-        top.addView(clock, cp);
+        top.addView(new ClockView(this), cp);
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER);
         card.setBackground(round(0x88506070, 30));
-        TextClock dd = new TextClock(this);
-        dd.setFormat24Hour("d");
-        dd.setFormat12Hour("d");
-        dd.setTextSize(56);
-        dd.setTextColor(Color.WHITE);
-        dd.setGravity(Gravity.CENTER);
-        card.addView(dd);
-        TextClock wd = new TextClock(this);
-        wd.setFormat24Hour("EEEE");
-        wd.setFormat12Hour("EEEE");
-        wd.setTextSize(16);
-        wd.setTextColor(0xE6FFFFFF);
-        wd.setGravity(Gravity.CENTER);
-        card.addView(wd);
-        TextClock mm = new TextClock(this);
-        mm.setFormat24Hour("MMMM");
-        mm.setFormat12Hour("MMMM");
-        mm.setTextSize(14);
-        mm.setTextColor(0xB3FFFFFF);
-        mm.setGravity(Gravity.CENTER);
-        card.addView(mm);
+        String[][] f = {{"d", "56", "FFFFFFFF"}, {"EEEE", "16", "E6FFFFFF"}, {"MMMM", "14", "B3FFFFFF"}};
+        for (String[] x : f) {
+            TextClock t = new TextClock(this);
+            t.setFormat24Hour(x[0]);
+            t.setFormat12Hour(x[0]);
+            t.setTextSize(Integer.parseInt(x[1]));
+            t.setTextColor((int) Long.parseLong(x[2], 16));
+            t.setGravity(Gravity.CENTER);
+            card.addView(t);
+        }
         LinearLayout.LayoutParams dp2 = new LinearLayout.LayoutParams(0, dp(160), 1f);
         dp2.leftMargin = dp(8);
         top.addView(card, dp2);
@@ -312,7 +310,7 @@ public class MainActivity extends Activity {
             public long getItemId(int i) { return i; }
             public View getView(int i, View v, ViewGroup p) {
                 String it = home.get(i);
-                return it.startsWith("f:") ? folderCell(it) : appCell(byPkg.get(it), false);
+                return it.startsWith("f:") ? folderCell(it) : appCell(it, false);
             }
         };
         homeGrid.setAdapter(homeAd);
@@ -339,7 +337,7 @@ public class MainActivity extends Activity {
 
         drawer = new LinearLayout(this);
         drawer.setOrientation(LinearLayout.VERTICAL);
-        drawer.setBackgroundColor(0xB30D0D12);
+        drawer.setBackgroundColor(0xE60D0D12);
         drawer.setPadding(dp(16), dp(56), dp(16), dp(8));
         drawer.setVisibility(View.GONE);
         search = new EditText(this);
@@ -365,7 +363,10 @@ public class MainActivity extends Activity {
             public int getCount() { return shown.size(); }
             public Object getItem(int i) { return shown.get(i); }
             public long getItemId(int i) { return i; }
-            public View getView(int i, View v, ViewGroup p) { return appCell(shown.get(i), true); }
+            public View getView(int i, View v, ViewGroup p) {
+                if (v == null) v = newCell();
+                return bind(v, shown.get(i), true);
+            }
         };
         grid.setAdapter(drawerAd);
         drawer.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -389,7 +390,7 @@ public class MainActivity extends Activity {
     void openDrawer() {
         drawer.setVisibility(View.VISIBLE);
         drawer.setTranslationY(getResources().getDisplayMetrics().heightPixels);
-        drawer.animate().translationY(0).setDuration(220).start();
+        drawer.animate().translationY(0).setDuration(200).start();
         setBlur(true);
     }
 
@@ -397,7 +398,7 @@ public class MainActivity extends Activity {
         if (drawer.getVisibility() != View.VISIBLE) return;
         search.setText("");
         setBlur(false);
-        drawer.animate().translationY(getResources().getDisplayMetrics().heightPixels).setDuration(200)
+        drawer.animate().translationY(getResources().getDisplayMetrics().heightPixels).setDuration(180)
                 .withEndAction(() -> drawer.setVisibility(View.GONE)).start();
     }
 
@@ -408,36 +409,49 @@ public class MainActivity extends Activity {
     }
 
     void reload() {
-        Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-        all = pm.queryIntentActivities(q, 0);
-        Collections.sort(all, (a, c) -> a.loadLabel(pm).toString().compareToIgnoreCase(c.loadLabel(pm).toString()));
-        byPkg.clear();
-        for (ResolveInfo r : all) byPkg.put(r.activityInfo.packageName, r);
+        new Thread(() -> {
+            Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            List<String> pk = new ArrayList<>();
+            for (ResolveInfo r : pm.queryIntentActivities(q, 0)) {
+                String p = r.activityInfo.packageName;
+                if (pk.contains(p)) continue;
+                pk.add(p);
+                if (!labels.containsKey(p)) {
+                    labels.put(p, r.loadLabel(pm).toString());
+                    bmps.put(p, rounded(r.loadIcon(pm)));
+                }
+            }
+            Collections.sort(pk, (a, c) -> labels.get(a).compareToIgnoreCase(labels.get(c)));
+            runOnUiThread(() -> apply(pk));
+        }).start();
+    }
 
+    void apply(List<String> pk) {
+        all = pk;
+        known = new HashSet<>(pk);
         if (!sp.contains("dock")) {
             List<String> d = new ArrayList<>();
             for (String k : new String[]{"dialer", "contacts", "mms", "camera"})
-                for (ResolveInfo r : all)
-                    if (r.activityInfo.packageName.contains(k)) { d.add(r.activityInfo.packageName); break; }
+                for (String p : all)
+                    if (p.contains(k)) { d.add(p); break; }
             sp.edit().putString("dock", TextUtils.join(",", d)).apply();
         }
         home.clear();
         for (String it : sp.getString("home", "").split(",")) {
-            if (it.startsWith("f:") ? !fpk(it).isEmpty() : byPkg.containsKey(it)) home.add(it);
+            if (it.startsWith("f:") ? !fpk(it).isEmpty() : known.contains(it)) home.add(it);
         }
         homeAd.notifyDataSetChanged();
-
         dock.removeAllViews();
         for (String p : getDock())
-            dock.addView(appCell(byPkg.get(p), false), new LinearLayout.LayoutParams(0, -2, 1f));
+            dock.addView(appCell(p, false), new LinearLayout.LayoutParams(0, -2, 1f));
         filter();
     }
 
     void filter() {
         String s = search.getText().toString().trim().toLowerCase();
         shown.clear();
-        for (ResolveInfo r : all)
-            if (s.isEmpty() || r.loadLabel(pm).toString().toLowerCase().contains(s)) shown.add(r);
+        for (String p : all)
+            if (s.isEmpty() || labels.get(p).toLowerCase().contains(s)) shown.add(p);
         drawerAd.notifyDataSetChanged();
     }
 
