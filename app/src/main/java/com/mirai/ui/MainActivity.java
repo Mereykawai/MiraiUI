@@ -3,8 +3,9 @@ package com.mirai.ui;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
-import android.content.Context;
+import android.app.WallpaperManager;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -12,7 +13,6 @@ import android.graphics.*;
 import android.graphics.drawable.AdaptiveIconDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -20,6 +20,7 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.util.DisplayMetrics;
 import android.view.*;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
@@ -28,6 +29,19 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class MainActivity extends Activity {
+    static final String[][] DEF = {
+        {"shape", "Форма иконок", "Оригинал,Скруглённые,Круглые,Квадрат"},
+        {"size", "Размер иконок", "Малый,Средний,Большой"},
+        {"cols", "Колонок на столе", "4,5,6"},
+        {"dcols", "Колонок в списке", "4,5,6"},
+        {"hl", "Подписи на столе", "Выкл,Вкл"},
+        {"blur", "Размытие фона", "Выкл,Слабое,Среднее,Сильное"},
+        {"glass", "Стекло на виджетах", "Выкл,Вкл"},
+        {"clock", "Стиль часов", "ColorOS,iOS,HyperOS,OriginOS,Скрыть"},
+        {"card", "Карточка рядом с часами", "Дата,Батарея,Скрыть"},
+        {"swipe", "Свайп вверх", "Список приложений,Выкл"},
+        {"dtap", "Двойной тап", "Выкл,Настройки,Список приложений"},
+        {"dock", "Док", "Показать,Скрыть"}};
     PackageManager pm;
     SharedPreferences sp;
     List<String> all = new ArrayList<>(), shown = new ArrayList<>(), home = new ArrayList<>();
@@ -35,48 +49,52 @@ public class MainActivity extends Activity {
     Map<String, String> labels = new ConcurrentHashMap<>();
     Map<String, Bitmap> bmps = new ConcurrentHashMap<>();
     BaseAdapter drawerAd, homeAd;
-    LinearLayout dock, drawer;
+    Glass dock, drawer, panel;
+    LinearLayout top, box;
     GridView homeGrid, grid;
     EditText search;
     GestureDetector gd;
     Dialog folderDlg;
+    TextView batTv, batSub;
     int isz;
 
     int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
+    int g(String k) { return sp.getInt("o_" + k, (k.equals("shape") || k.equals("size") || k.equals("glass")) ? 1 : 0); }
 
-    GradientDrawable round(int color, int r) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(color);
-        g.setCornerRadius(dp(r));
-        return g;
+    LinearLayout.LayoutParams lp(int w, int h, float wt) { return new LinearLayout.LayoutParams(w, h, wt); }
+
+    TextView tv(String s, int size, int col) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(size);
+        t.setTextColor(col);
+        return t;
     }
 
-    GradientDrawable glass(int r) {
-        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x66FFFFFF, 0x26FFFFFF});
-        g.setCornerRadius(dp(r));
-        g.setStroke(dp(1), 0x55FFFFFF);
-        return g;
+    TextClock tc(String f, int size, int col) {
+        TextClock t = new TextClock(this);
+        t.setFormat24Hour(f);
+        t.setFormat12Hour(f);
+        t.setTextSize(size);
+        t.setTextColor(col);
+        t.setIncludeFontPadding(false);
+        t.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        return t;
     }
 
     void prefs() {
         int[] s = {52, 60, 68};
-        isz = dp(s[sp.getInt("size", 1)]);
-        int cols = sp.getInt("cols", 4);
-        homeGrid.setNumColumns(cols);
-        grid.setNumColumns(cols);
+        isz = dp(s[g("size")]);
+        homeGrid.setNumColumns(4 + g("cols"));
+        grid.setNumColumns(4 + g("dcols"));
     }
 
     Bitmap rounded(Drawable d) {
-        int s = isz, shape = sp.getInt("shape", 1);
+        int s = isz, shape = g("shape");
         Bitmap b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(b);
-        if (shape == 0) {
-            d.setBounds(0, 0, s, s);
-            d.draw(c);
-            return b;
-        }
-        float r = shape == 2 ? s / 2f : s * 0.28f;
+        if (shape == 0) { d.setBounds(0, 0, s, s); d.draw(c); return b; }
+        float r = shape == 2 ? s / 2f : shape == 3 ? s * 0.12f : s * 0.28f;
         Path p = new Path();
         p.addRoundRect(0, 0, s, s, r, r, Path.Direction.CW);
         c.clipPath(p);
@@ -94,45 +112,12 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    class ClockView extends View {
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        ClockView(Context c) { super(c); }
-        protected void onDraw(Canvas cv) {
-            float w = getWidth(), h = getHeight(), cx = w / 2, cy = h / 2, r = w / 2;
-            p.setStyle(Paint.Style.FILL);
-            p.setColor(Color.WHITE);
-            cv.drawRoundRect(0, 0, w, h, dp(30), dp(30), p);
-            p.setColor(0xFF1A1A1A);
-            p.setTextSize(dp(22));
-            p.setTextAlign(Paint.Align.CENTER);
-            cv.drawText("12", cx, dp(36), p);
-            cv.drawText("6", cx, h - dp(16), p);
-            cv.drawText("3", w - dp(22), cy + dp(8), p);
-            cv.drawText("9", dp(22), cy + dp(8), p);
-            Calendar c = Calendar.getInstance();
-            float s = c.get(Calendar.SECOND), m = c.get(Calendar.MINUTE) + s / 60, hr = c.get(Calendar.HOUR) + m / 60;
-            hand(cv, cx, cy, hr * 30, r * 0.45f, dp(5), 0xFF1A1A1A);
-            hand(cv, cx, cy, m * 6, r * 0.7f, dp(5), 0xFF1A1A1A);
-            hand(cv, cx, cy, s * 6, r * 0.75f, dp(2), 0xFFFF3B30);
-            postInvalidateDelayed(1000);
-        }
-        void hand(Canvas cv, float cx, float cy, float deg, float len, float wd, int col) {
-            p.setColor(col);
-            p.setStrokeWidth(wd);
-            p.setStrokeCap(Paint.Cap.ROUND);
-            double a = Math.toRadians(deg - 90);
-            cv.drawLine(cx, cy, (float) (cx + len * Math.cos(a)), (float) (cy + len * Math.sin(a)), p);
-        }
-    }
-
     View newCell() {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         c.setGravity(Gravity.CENTER_HORIZONTAL);
         c.addView(new ImageView(this), new LinearLayout.LayoutParams(isz, isz));
-        TextView t = new TextView(this);
-        t.setTextColor(Color.WHITE);
-        t.setTextSize(11);
+        TextView t = tv("", 11, Color.WHITE);
         t.setSingleLine(true);
         t.setGravity(Gravity.CENTER);
         t.setShadowLayer(4, 0, 1, 0x99000000);
@@ -172,19 +157,18 @@ public class MainActivity extends Activity {
         List<String> pk = fpk(it);
         LinearLayout wrap = new LinearLayout(this);
         wrap.setGravity(Gravity.CENTER_HORIZONTAL);
-        LinearLayout box = new LinearLayout(this);
+        Glass box = new Glass(this, 18, 0x22FFFFFF);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
-        box.setBackground(glass(18));
         for (int r = 0; r < 2; r++) {
             LinearLayout row = new LinearLayout(this);
             for (int c = 0; c < 2; c++) {
                 int i = r * 2 + c;
                 ImageView iv = new ImageView(this);
                 if (i < pk.size()) iv.setImageBitmap(bmps.get(pk.get(i)));
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(isz * 2 / 5, isz * 2 / 5);
-                lp.setMargins(dp(2), dp(2), dp(2), dp(2));
-                row.addView(iv, lp);
+                LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(isz * 2 / 5, isz * 2 / 5);
+                l.setMargins(dp(2), dp(2), dp(2), dp(2));
+                row.addView(iv, l);
             }
             box.addView(row);
         }
@@ -203,41 +187,32 @@ public class MainActivity extends Activity {
     }
 
     void openFolder(String it) {
-        GridView g = new GridView(this);
-        g.setNumColumns(3);
-        g.setVerticalSpacing(dp(14));
-        g.setPadding(dp(16), dp(20), dp(16), dp(20));
+        GridView gv = new GridView(this);
+        gv.setNumColumns(3);
+        gv.setVerticalSpacing(dp(14));
+        gv.setPadding(dp(16), dp(20), dp(16), dp(20));
         final List<String> pk = fpk(it);
-        g.setAdapter(new BaseAdapter() {
+        gv.setAdapter(new BaseAdapter() {
             public int getCount() { return pk.size(); }
             public Object getItem(int i) { return pk.get(i); }
             public long getItemId(int i) { return i; }
             public View getView(int i, View v, ViewGroup p) { return appCell(pk.get(i), true); }
         });
-        folderDlg = new AlertDialog.Builder(this).setView(g).create();
-        folderDlg.getWindow().setBackgroundDrawable(round(0xDD20202A, 32));
+        Glass wrap = new Glass(this, 32, 0xAA181820);
+        wrap.addView(gv, new LinearLayout.LayoutParams(-1, -2));
+        folderDlg = new AlertDialog.Builder(this).setView(wrap).create();
+        folderDlg.getWindow().setBackgroundDrawable(new ColorDrawable(0));
         folderDlg.show();
-        blurWin(folderDlg.getWindow(), true);
-        g.setScaleX(.8f);
-        g.setScaleY(.8f);
-        g.setAlpha(0f);
-        g.animate().scaleX(1f).scaleY(1f).alpha(1f).setInterpolator(new OvershootInterpolator(1.1f)).setDuration(260).start();
+        wrap.setScaleX(.8f);
+        wrap.setScaleY(.8f);
+        wrap.setAlpha(0f);
+        wrap.animate().scaleX(1f).scaleY(1f).alpha(1f).setInterpolator(new OvershootInterpolator(1.1f)).setDuration(260).start();
     }
 
     void launch(String pkg) {
         if (folderDlg != null) folderDlg.dismiss();
         Intent in = pm.getLaunchIntentForPackage(pkg);
         if (in != null) startActivity(in);
-    }
-
-    void blurWin(Window w, boolean on) {
-        if (Build.VERSION.SDK_INT < 31 || !sp.getBoolean("blur", false)) return;
-        try {
-            WindowManager.LayoutParams lp = w.getAttributes();
-            if (on) w.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
-            lp.setBlurBehindRadius(on ? 50 : 0);
-            w.setAttributes(lp);
-        } catch (Throwable t) { }
     }
 
     void saveHome() { sp.edit().putString("home", TextUtils.join(",", home)).apply(); }
@@ -308,40 +283,165 @@ public class MainActivity extends Activity {
         }).show();
     }
 
-    void settings() {
-        String[] shapes = {"Оригинал", "Скруглённые", "Круглые"};
-        int[] sizes = {52, 60, 68};
-        String[] it = {
-                "Форма иконок: " + shapes[sp.getInt("shape", 1)],
-                "Размер иконок: " + sizes[sp.getInt("size", 1)],
-                "Колонок: " + sp.getInt("cols", 4),
-                "Размытие: " + (sp.getBoolean("blur", false) ? "вкл" : "выкл"),
-                "Подписи на столе: " + (sp.getBoolean("hl", false) ? "вкл" : "выкл")};
-        new AlertDialog.Builder(this).setTitle("MiraiUi").setItems(it, (d, w) -> {
-            SharedPreferences.Editor e = sp.edit();
-            if (w == 0) e.putInt("shape", (sp.getInt("shape", 1) + 1) % 3);
-            if (w == 1) e.putInt("size", (sp.getInt("size", 1) + 1) % 3);
-            if (w == 2) e.putInt("cols", sp.getInt("cols", 4) == 4 ? 5 : 4);
-            if (w == 3) e.putBoolean("blur", !sp.getBoolean("blur", false));
-            if (w == 4) e.putBoolean("hl", !sp.getBoolean("hl", false));
-            e.apply();
-            prefs();
-            homeGrid.setAdapter(homeAd);
-            grid.setAdapter(drawerAd);
-            bmps.clear();
-            labels.clear();
-            reload();
-            settings();
-        }).show();
+    // ---------- виджеты ----------
+    void buildTop() {
+        top.removeAllViews();
+        int ck = g("clock"), cd = g("card"), h = dp(160);
+        if (ck == 3) {
+            Glass w = new Glass(this, 30, 0x40FFFFFF);
+            w.setOrientation(LinearLayout.VERTICAL);
+            w.setGravity(Gravity.CENTER_VERTICAL);
+            w.setPadding(dp(24), 0, dp(24), 0);
+            w.addView(tc("HH:mm", 52, Color.WHITE));
+            w.addView(tc("EEEE, d MMMM", 15, 0xDDFFFFFF));
+            top.addView(w, lp(-1, dp(120), 0));
+            return;
+        }
+        View a = null;
+        if (ck == 0 || ck == 1) a = new ClockView(this, ck == 1);
+        else if (ck == 2) {
+            Glass c = new Glass(this, 30, 0x40FFFFFF);
+            c.setOrientation(LinearLayout.VERTICAL);
+            c.setGravity(Gravity.CENTER);
+            c.addView(tc("HH", 50, Color.WHITE));
+            c.addView(tc("mm", 50, 0xFFFF6A3D));
+            c.addView(tc("EEE, d MMM", 13, 0xCCFFFFFF));
+            a = c;
+        }
+        if (a != null) {
+            LinearLayout.LayoutParams l = lp(0, h, 1f);
+            l.rightMargin = cd == 2 ? 0 : dp(8);
+            top.addView(a, l);
+        }
+        if (cd < 2) {
+            Glass c = new Glass(this, 30, 0x40FFFFFF);
+            c.setOrientation(LinearLayout.VERTICAL);
+            c.setGravity(Gravity.CENTER);
+            if (cd == 0) {
+                c.addView(tc("d", 56, Color.WHITE));
+                c.addView(tc("EEEE", 16, 0xE6FFFFFF));
+                c.addView(tc("MMMM", 14, 0xB3FFFFFF));
+            } else {
+                batTv = tv("", 44, Color.WHITE);
+                batSub = tv("", 15, 0xCCFFFFFF);
+                batTv.setGravity(Gravity.CENTER);
+                batSub.setGravity(Gravity.CENTER);
+                c.addView(batTv);
+                c.addView(batSub);
+                bat();
+            }
+            LinearLayout.LayoutParams l = lp(0, h, 1f);
+            l.leftMargin = a != null ? dp(8) : 0;
+            top.addView(c, l);
+        }
     }
 
+    void bat() {
+        if (batTv == null) return;
+        Intent i = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (i == null) return;
+        int l = i.getIntExtra("level", 0), sc = Math.max(1, i.getIntExtra("scale", 100));
+        batTv.setText((l * 100 / sc) + "%");
+        batSub.setText(i.getIntExtra("status", 0) == 2 ? "Заряжается" : "Батарея");
+    }
+
+    void loadBlur() {
+        new Thread(() -> {
+            try {
+                DisplayMetrics dm = new DisplayMetrics();
+                getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+                Drawable d = WallpaperManager.getInstance(this).getDrawable();
+                if (d == null) return;
+                int W = dm.widthPixels, H = dm.heightPixels, sw = Math.max(1, W / 14), sh = Math.max(1, H / 14);
+                Bitmap t = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
+                Canvas c = new Canvas(t);
+                float iw = Math.max(1, d.getIntrinsicWidth()), ih = Math.max(1, d.getIntrinsicHeight());
+                float sc = Math.max(sw / iw, sh / ih);
+                c.translate((sw - iw * sc) / 2, (sh - ih * sc) / 2);
+                c.scale(sc, sc);
+                d.setBounds(0, 0, (int) iw, (int) ih);
+                d.draw(c);
+                Glass.blur = Bitmap.createScaledBitmap(t, W, H, true);
+                runOnUiThread(Glass::refresh);
+            } catch (Throwable e) { }
+        }).start();
+    }
+
+    void applyBlur() {
+        int lv = g("blur");
+        getWindow().setBackgroundDrawable(new ColorDrawable(lv > 0 ? 0x22000000 : 0));
+        if (Build.VERSION.SDK_INT >= 31) {
+            try { getWindow().setBackgroundBlurRadius(new int[]{0, 25, 60, 120}[lv]); } catch (Throwable t) { }
+        }
+    }
+
+    // ---------- настройки ----------
+    TextView link(String s, View.OnClickListener l) {
+        TextView t = tv(s, 16, 0xFFFFFFFF);
+        t.setPadding(dp(8), dp(14), dp(8), dp(14));
+        t.setOnClickListener(l);
+        return t;
+    }
+
+    void fill() {
+        box.removeAllViews();
+        for (String[] d : DEF) {
+            String[] o = d[2].split(",");
+            LinearLayout row = new LinearLayout(this);
+            row.setPadding(dp(8), dp(14), dp(8), dp(14));
+            row.addView(tv(d[1], 16, Color.WHITE), lp(0, -2, 1f));
+            row.addView(tv(o[g(d[0])], 16, 0xFFFF9F0A));
+            row.setOnClickListener(v -> {
+                sp.edit().putInt("o_" + d[0], (g(d[0]) + 1) % o.length).apply();
+                onPrefs();
+            });
+            box.addView(row);
+        }
+        box.addView(link("Скрытые приложения", v -> hiddenDlg()));
+        box.addView(link("Сбросить рабочий стол и док", v -> {
+            sp.edit().remove("home").remove("dock").apply();
+            onPrefs();
+        }));
+        box.addView(link("Закрыть", v -> hide(panel)));
+    }
+
+    void onPrefs() {
+        prefs();
+        Glass.on = g("glass") == 1;
+        applyBlur();
+        homeGrid.setAdapter(homeAd);
+        grid.setAdapter(drawerAd);
+        bmps.clear();
+        labels.clear();
+        reload();
+        buildTop();
+        dock.setVisibility(g("dock") == 0 ? View.VISIBLE : View.GONE);
+        Glass.refresh();
+        fill();
+    }
+
+    void hiddenDlg() {
+        Set<String> hid = new HashSet<>(Arrays.asList(sp.getString("hid", "").split(",")));
+        String[] n = new String[all.size()];
+        boolean[] c = new boolean[n.length];
+        for (int i = 0; i < n.length; i++) { n[i] = labels.get(all.get(i)); c[i] = hid.contains(all.get(i)); }
+        new AlertDialog.Builder(this).setTitle("Скрытые приложения")
+                .setMultiChoiceItems(n, c, (d, i, ch) -> c[i] = ch)
+                .setPositiveButton("OK", (d, w) -> {
+                    List<String> l = new ArrayList<>();
+                    for (int i = 0; i < n.length; i++) if (c[i]) l.add(all.get(i));
+                    sp.edit().putString("hid", TextUtils.join(",", l)).apply();
+                    filter();
+                }).show();
+    }
+
+    // ---------- создание ----------
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         pm = getPackageManager();
         sp = getSharedPreferences("mirai", MODE_PRIVATE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
-        getWindow().setBackgroundDrawable(new ColorDrawable(0));
         getWindow().setStatusBarColor(0);
         getWindow().setNavigationBarColor(0);
 
@@ -350,28 +450,7 @@ public class MainActivity extends Activity {
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(18), dp(56), dp(18), dp(16));
 
-        LinearLayout top = new LinearLayout(this);
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, dp(160), 1f);
-        cp.rightMargin = dp(8);
-        top.addView(new ClockView(this), cp);
-
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER);
-        card.setBackground(glass(30));
-        String[][] f = {{"d", "56", "FFFFFFFF"}, {"EEEE", "16", "E6FFFFFF"}, {"MMMM", "14", "B3FFFFFF"}};
-        for (String[] x : f) {
-            TextClock t = new TextClock(this);
-            t.setFormat24Hour(x[0]);
-            t.setFormat12Hour(x[0]);
-            t.setTextSize(Integer.parseInt(x[1]));
-            t.setTextColor((int) Long.parseLong(x[2], 16));
-            t.setGravity(Gravity.CENTER);
-            card.addView(t);
-        }
-        LinearLayout.LayoutParams dp2 = new LinearLayout.LayoutParams(0, dp(160), 1f);
-        dp2.leftMargin = dp(8);
-        top.addView(card, dp2);
+        top = new LinearLayout(this);
         page.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
         homeGrid = new GridView(this);
@@ -383,49 +462,47 @@ public class MainActivity extends Activity {
             public long getItemId(int i) { return i; }
             public View getView(int i, View v, ViewGroup p) {
                 String it = home.get(i);
-                return it.startsWith("f:") ? folderCell(it) : appCell(it, sp.getBoolean("hl", false));
+                return it.startsWith("f:") ? folderCell(it) : appCell(it, g("hl") == 1);
             }
         };
         homeGrid.setAdapter(homeAd);
-        LinearLayout.LayoutParams gp = new LinearLayout.LayoutParams(-1, 0, 1f);
+        LinearLayout.LayoutParams gp = lp(-1, 0, 1f);
         gp.topMargin = dp(28);
         page.addView(homeGrid, gp);
 
-        TextView pill = new TextView(this);
-        pill.setText("🔍  Search");
-        pill.setTextColor(Color.WHITE);
-        pill.setTextSize(15);
-        pill.setPadding(dp(26), dp(10), dp(26), dp(10));
-        pill.setBackground(glass(24));
+        Glass pill = new Glass(this, 24, 0x40000000);
+        pill.setGravity(Gravity.CENTER);
+        pill.setPadding(dp(30), dp(10), dp(30), dp(10));
+        pill.addView(tv("Search", 15, Color.WHITE));
         pill.setOnClickListener(v -> openDrawer());
-        pill.setOnLongClickListener(v -> { settings(); return true; });
+        pill.setOnLongClickListener(v -> { openPanel(); return true; });
         LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(-2, -2);
         pl.gravity = Gravity.CENTER_HORIZONTAL;
         pl.bottomMargin = dp(16);
         page.addView(pill, pl);
 
-        dock = new LinearLayout(this);
+        dock = new Glass(this, 34, 0x33FFFFFF);
         dock.setGravity(Gravity.CENTER);
-        dock.setBackground(glass(34));
         dock.setPadding(dp(10), dp(12), dp(10), dp(12));
         page.addView(dock, new LinearLayout.LayoutParams(-1, -2));
         root.addView(page);
 
-        drawer = new LinearLayout(this);
+        drawer = new Glass(this, 0, 0xB3101018);
         drawer.setOrientation(LinearLayout.VERTICAL);
-        drawer.setBackgroundColor(0xE60D0D12);
         drawer.setPadding(dp(16), dp(56), dp(16), dp(8));
         drawer.setVisibility(View.GONE);
+        Glass sb = new Glass(this, 22, 0x22FFFFFF);
         search = new EditText(this);
-        search.setHint("Поиск приложений");
+          search.setHint("Поиск приложений");
         search.setHintTextColor(0x99FFFFFF);
         search.setTextColor(Color.WHITE);
         search.setSingleLine(true);
-        search.setBackground(glass(22));
+        search.setBackground(null);
         search.setPadding(dp(18), dp(12), dp(18), dp(12));
-        LinearLayout.LayoutParams sp2 = new LinearLayout.LayoutParams(-1, -2);
-        sp2.bottomMargin = dp(16);
-        drawer.addView(search, sp2);
+        sb.addView(search, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(-1, -2);
+        sl.bottomMargin = dp(16);
+        drawer.addView(sb, sl);
         search.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int c, int d) {}
             public void onTextChanged(CharSequence s, int a, int c, int d) { filter(); }
@@ -444,14 +521,39 @@ public class MainActivity extends Activity {
             }
         };
         grid.setAdapter(drawerAd);
-        drawer.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1f));
+        drawer.addView(grid, lp(-1, 0, 1f));
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
+
+        panel = new Glass(this, 0, 0xD0101018);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(20), dp(56), dp(20), dp(16));
+        panel.setVisibility(View.GONE);
+        panel.addView(tv("Настройки MiraiUi", 22, Color.WHITE));
+        ScrollView sv = new ScrollView(this);
+        box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        sv.addView(box);
+        panel.addView(sv, lp(-1, 0, 1f));
+        root.addView(panel, new FrameLayout.LayoutParams(-1, -1));
+
         prefs();
+        Glass.on = g("glass") == 1;
         setContentView(root);
+        applyBlur();
+        buildTop();
+        dock.setVisibility(g("dock") == 0 ? View.VISIBLE : View.GONE);
+        fill();
+        loadBlur();
 
         gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             public boolean onFling(MotionEvent e1, MotionEvent e2, float vx, float vy) {
-                if (e1 != null && vy < -1200 && Math.abs(vy) > Math.abs(vx) && drawer.getVisibility() == View.GONE) openDrawer();
+                if (e1 != null && g("swipe") == 0 && vy < -1200 && Math.abs(vy) > Math.abs(vx)) openDrawer();
+                return false;
+            }
+            public boolean onDoubleTap(MotionEvent e) {
+                int a = g("dtap");
+                if (a == 1) openPanel();
+                if (a == 2) openDrawer();
                 return false;
             }
         });
@@ -463,27 +565,37 @@ public class MainActivity extends Activity {
         return super.dispatchTouchEvent(ev);
     }
 
-    void openDrawer() {
-        int h = getResources().getDisplayMetrics().heightPixels;
-        drawer.setVisibility(View.VISIBLE);
-        drawer.setTranslationY(h / 3f);
-        drawer.setAlpha(0f);
-        drawer.animate().translationY(0).alpha(1f).setInterpolator(new DecelerateInterpolator(2f)).setDuration(260).start();
-        blurWin(getWindow(), true);
+    void show(View v) {
+        v.setVisibility(View.VISIBLE);
+        v.setTranslationY(dp(120));
+        v.setAlpha(0f);
+        v.animate().translationY(0).alpha(1f).setInterpolator(new DecelerateInterpolator(2f)).setDuration(260).start();
     }
 
-    void closeDrawer() {
-        if (drawer.getVisibility() != View.VISIBLE) return;
+    void hide(View v) {
+        if (v.getVisibility() != View.VISIBLE) return;
+        v.animate().translationY(dp(120)).alpha(0f).setDuration(200).withEndAction(() -> v.setVisibility(View.GONE)).start();
+    }
+
+    void openDrawer() {
+        if (drawer.getVisibility() == View.GONE && panel.getVisibility() == View.GONE) show(drawer);
+    }
+
+    void openPanel() {
+        if (panel.getVisibility() == View.GONE) { fill(); show(panel); }
+    }
+
+    void closeAll() {
         search.setText("");
-        blurWin(getWindow(), false);
-        drawer.animate().translationY(getResources().getDisplayMetrics().heightPixels / 3f).alpha(0f)
-                .setDuration(200).withEndAction(() -> drawer.setVisibility(View.GONE)).start();
+        hide(drawer);
+        hide(panel);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         reload();
+        bat();
     }
 
     void reload() {
@@ -527,9 +639,10 @@ public class MainActivity extends Activity {
 
     void filter() {
         String s = search.getText().toString().trim().toLowerCase();
+        Set<String> hid = new HashSet<>(Arrays.asList(sp.getString("hid", "").split(",")));
         shown.clear();
         for (String p : all)
-            if (s.isEmpty() || labels.get(p).toLowerCase().contains(s)) shown.add(p);
+            if (!hid.contains(p) && (s.isEmpty() || labels.get(p).toLowerCase().contains(s))) shown.add(p);
         drawerAd.notifyDataSetChanged();
     }
 
@@ -537,12 +650,12 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
         if (folderDlg != null) folderDlg.dismiss();
-        closeDrawer();
+        closeAll();
     }
 
     @Override
     public void onBackPressed() {
         if (folderDlg != null && folderDlg.isShowing()) folderDlg.dismiss();
-        else closeDrawer();
+        else closeAll();
     }
 }
