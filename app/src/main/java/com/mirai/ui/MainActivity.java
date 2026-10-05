@@ -37,6 +37,7 @@ public class MainActivity extends Activity {
         {"hl", "Подписи на столе", "Выкл,Вкл"},
         {"blur", "Размытие фона", "Выкл,Слабое,Среднее,Сильное"},
         {"glass", "Стекло на виджетах", "Выкл,Вкл"},
+        {"gblur", "Сила размытия панелей", "Сильная,Средняя,Слабая"},
         {"clock", "Стиль часов", "ColorOS,iOS,HyperOS,OriginOS,Скрыть"},
         {"card", "Карточка рядом с часами", "Дата,Батарея,Скрыть,Погода"},
         {"swipe", "Свайп вверх", "Список приложений,Выкл"},
@@ -78,6 +79,8 @@ public class MainActivity extends Activity {
         t.setTextSize(size);
         t.setTextColor(col);
         t.setIncludeFontPadding(false);
+        t.setGravity(Gravity.CENTER);
+        t.setShadowLayer(6, 0, 1, 0x66000000);
         t.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         return t;
     }
@@ -354,7 +357,7 @@ public class MainActivity extends Activity {
                 getWindowManager().getDefaultDisplay().getRealMetrics(dm);
                 Drawable d = WallpaperManager.getInstance(this).getDrawable();
                 if (d == null) return;
-                int W = dm.widthPixels, H = dm.heightPixels, sw = Math.max(1, W / 14), sh = Math.max(1, H / 14);
+                int W = dm.widthPixels, H = dm.heightPixels, k = new int[]{48, 28, 14}[g("gblur")], sw = Math.max(1, W / k), sh = Math.max(1, H / k);
                 Bitmap t = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
                 Canvas c = new Canvas(t);
                 float iw = Math.max(1, d.getIntrinsicWidth()), ih = Math.max(1, d.getIntrinsicHeight());
@@ -419,7 +422,7 @@ public class MainActivity extends Activity {
         reload();
         buildTop();
         dock.setVisibility(g("dock") == 0 ? View.VISIBLE : View.GONE);
-        Glass.refresh();
+        loadBlur();
         fill();
     }
 void cityDlg() {
