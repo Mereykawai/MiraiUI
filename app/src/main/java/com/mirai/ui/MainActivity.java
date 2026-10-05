@@ -488,4 +488,61 @@ public class MainActivity extends Activity {
 
     void reload() {
         new Thread(() -> {
-            Intent q = new Intent(Intent.ACTION_MAIN).addCategor
+            Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            List<String> pk = new ArrayList<>();
+            for (ResolveInfo r : pm.queryIntentActivities(q, 0)) {
+                String p = r.activityInfo.packageName;
+                if (pk.contains(p)) continue;
+                pk.add(p);
+                if (!labels.containsKey(p)) {
+                    labels.put(p, r.loadLabel(pm).toString());
+                    bmps.put(p, rounded(r.loadIcon(pm)));
+                }
+            }
+            Collections.sort(pk, (a, c) -> labels.get(a).compareToIgnoreCase(labels.get(c)));
+            runOnUiThread(() -> apply(pk));
+        }).start();
+    }
+
+    void apply(List<String> pk) {
+        all = pk;
+        known = new HashSet<>(pk);
+        if (!sp.contains("dock")) {
+            List<String> d = new ArrayList<>();
+            for (String k : new String[]{"dialer", "contacts", "mms", "camera"})
+                for (String p : all)
+                    if (p.contains(k)) { d.add(p); break; }
+            sp.edit().putString("dock", TextUtils.join(",", d)).apply();
+        }
+        home.clear();
+        for (String it : sp.getString("home", "").split(",")) {
+            if (it.startsWith("f:") ? !fpk(it).isEmpty() : known.contains(it)) home.add(it);
+        }
+        homeAd.notifyDataSetChanged();
+        dock.removeAllViews();
+        for (String p : getDock())
+            dock.addView(appCell(p, false), new LinearLayout.LayoutParams(0, -2, 1f));
+        filter();
+    }
+
+    void filter() {
+        String s = search.getText().toString().trim().toLowerCase();
+        shown.clear();
+        for (String p : all)
+            if (s.isEmpty() || labels.get(p).toLowerCase().contains(s)) shown.add(p);
+        drawerAd.notifyDataSetChanged();
+    }
+
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        if (folderDlg != null) folderDlg.dismiss();
+        closeDrawer();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (folderDlg != null && folderDlg.isShowing()) folderDlg.dismiss();
+        else closeDrawer();
+    }
+}
