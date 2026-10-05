@@ -313,7 +313,7 @@ public class MainActivity extends Activity {
             l.rightMargin = cd == 2 ? 0 : dp(8);
             top.addView(a, l);
         }
-        if (cd < 2) {
+        if (cd != 2) {
             Glass c = new Glass(this, 30, 0x40FFFFFF);
             c.setOrientation(LinearLayout.VERTICAL);
             c.setGravity(Gravity.CENTER);
@@ -321,6 +321,8 @@ public class MainActivity extends Activity {
                 c.addView(tc("d", 56, Color.WHITE));
                 c.addView(tc("EEEE", 16, 0xE6FFFFFF));
                 c.addView(tc("MMMM", 14, 0xB3FFFFFF));
+            } else if (cd == 3) {
+                Weather.card(this, c, sp.getString("city", ""));
             } else {
                 batTv = tv("", 44, Color.WHITE);
                 batSub = tv("", 15, 0xCCFFFFFF);
@@ -397,6 +399,7 @@ public class MainActivity extends Activity {
             });
             box.addView(row);
         }
+        box.addView(link("Город для погоды: " + sp.getString("city", "не указан"), v -> cityDlg()));
         box.addView(link("Скрытые приложения", v -> hiddenDlg()));
         box.addView(link("Сбросить рабочий стол и док", v -> {
             sp.edit().remove("home").remove("dock").apply();
@@ -419,7 +422,16 @@ public class MainActivity extends Activity {
         Glass.refresh();
         fill();
     }
-
+void cityDlg() {
+        EditText e = new EditText(this);
+        e.setText(sp.getString("city", ""));
+        new AlertDialog.Builder(this).setTitle("Город для погоды").setView(e)
+                .setPositiveButton("OK", (d, w) -> {
+                    sp.edit().putString("city", e.getText().toString().trim()).apply();
+                    Weather.stale();
+                    onPrefs();
+                }).show();
+}
     void hiddenDlg() {
         Set<String> hid = new HashSet<>(Arrays.asList(sp.getString("hid", "").split(",")));
         String[] n = new String[all.size()];
