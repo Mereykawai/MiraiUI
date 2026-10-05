@@ -6,7 +6,7 @@ android {
         applicationId 'com.mirai.ui'
         minSdk 24
         targetSdk 34
-        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '1') as Integer
+        versionCode Integer.parseInt(System.getenv('GITHUB_RUN_NUMBER') ?: '1')
         versionName '1.0'
     }
     signingConfigs {
