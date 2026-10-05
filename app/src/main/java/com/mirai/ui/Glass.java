@@ -35,10 +35,16 @@ class Glass extends LinearLayout {
             cv.drawBitmap(blur, -l[0], -l[1], null);
         }
         cv.drawColor(tint);
+        if (on) {
+            p.setStyle(Paint.Style.FILL);
+            p.setShader(new LinearGradient(0, 0, 0, h, 0x44FFFFFF, 0x0DFFFFFF, Shader.TileMode.CLAMP));
+            cv.drawRect(0, 0, w, h, p);
+            p.setShader(null);
+        }
         cv.restore();
         p.setStyle(Paint.Style.STROKE);
         p.setStrokeWidth(getResources().getDisplayMetrics().density);
-        p.setColor(0x55FFFFFF);
+        p.setColor(0x66FFFFFF);
         cv.drawRoundRect(0.5f, 0.5f, w - 0.5f, h - 0.5f, r, r, p);
     }
 
